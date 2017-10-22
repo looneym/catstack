@@ -8,36 +8,6 @@ resource "aws_vpc" "myapp" {
      cidr_block = "10.100.0.0/16"
 }
 
-resource "aws_subnet" "public_1a" {
-    vpc_id = "${aws_vpc.myapp.id}"
-    cidr_block = "10.100.0.0/24"
-    map_public_ip_on_launch = "true"
-    availability_zone = "us-east-1a"
-
-    tags {
-        Name = "Public 1A"
-    }
-}
-
-resource "aws_subnet" "public_1b" {
-    vpc_id = "${aws_vpc.myapp.id}"
-    cidr_block = "10.100.1.0/24"
-    map_public_ip_on_launch = "true"
-    availability_zone = "us-east-1b"
-
-    tags {
-        Name = "Public 1B"
-    }
-}
-
-resource "aws_internet_gateway" "gw" {
-    vpc_id = "${aws_vpc.myapp.id}"
-
-    tags {
-        Name = "myapp gw"
-    }
-}
-
 resource "aws_security_group" "allow_ssh" {
   name = "allow_all"
   description = "Allow inbound SSH traffic from my IP"
@@ -75,100 +45,98 @@ resource "aws_security_group" "web_server" {
   }
 }
 
-resource "aws_security_group" "myapp_mysql_rds" {
-  name = "web server"
-  description = "Allow access to MySQL RDS"
-  vpc_id = "${aws_vpc.myapp.id}"
-
-  ingress {
-      from_port = 3306
-      to_port = 3306
-      protocol = "tcp"
-      cidr_blocks = ["${aws_instance.web01.private_ip}","${aws_instance.web02.private_ip}"]
-  }
-
-  egress {
-      from_port = 1024
-      to_port = 65535
-      protocol = "tcp"
-      cidr_blocks = ["0.0.0.0/0"]
-  }
-}
 
 resource "aws_instance" "web01" {
     ami = "ami-408c7f28"
     instance_type = "t1.micro"
     subnet_id = "${aws_subnet.public_1a.id}"
     vpc_security_group_ids = ["${aws_security_group.web_server.id}","${aws_security_group.allow_ssh.id}"]
-    key_name = "myapp keypair"
+    key_name = "sobotka"
     tags {
         Name = "web01"
     }
 }
 
-resource "aws_instance" "web02" {
-    ami = "ami-408c7f28"
-    instance_type = "t1.micro"
-    subnet_id = "${aws_subnet.public_1b.id}"
-    vpc_security_group_ids = ["${aws_security_group.web_server.id}","${aws_security_group.allow_ssh.id}"]
-    key_name = "myapp keypair"
+resource "aws_security_group" "mydb1" {  
+  name = "mydb1"
+
+  description = "RDS postgres servers (terraform-managed)"
+  vpc_id = "${aws_vpc.myapp.id}"
+
+  # Only postgres in
+  ingress {
+    from_port = 5432
+    to_port = 5432
+    protocol = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # Allow all outbound traffic.
+  egress {
+    from_port = 0
+    to_port = 0
+    protocol = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+
+resource "aws_subnet" "public_1b" {
+    vpc_id = "${aws_vpc.myapp.id}"
+    cidr_block = "10.100.1.0/24"
+    map_public_ip_on_launch = "true"
+    availability_zone = "us-east-1b"
+
     tags {
-        Name = "web02"
+        Name = "Public 1B"
     }
 }
 
-resource "aws_elb" "web-elb" {
-  name = "web-elb"
-  availability_zones = ["us-east-1a", "us-east-1b"]
-
-  listener {
-    instance_port = 80
-    instance_protocol = "http"
-    lb_port = 80
-    lb_protocol = "http"
-  }
-
-
-  health_check {
-    healthy_threshold = 2
-    unhealthy_threshold = 2
-    timeout = 3
-    target = "HTTP:80/"
-    interval = 30
-  }
-
-  instances = ["${aws_instance.web01.id}","${aws_instance.web02.id}"]
-
-  cross_zone_load_balancing = true
-  idle_timeout = 400
-  connection_draining = true
-  connection_draining_timeout = 400
-
-  tags {
-    Name = "Web ELB"
-  }
-}
 
 resource "aws_db_subnet_group" "myapp-db" {
     name = "main"
     description = "Our main group of subnets"
-    subnet_ids = ["${aws_subnet.public-1a.id}", "${aws_subnet.public-1b.id}"]
+    subnet_ids = ["${aws_subnet.public_1a.id}", "${aws_subnet.public_1b.id}"]
     tags {
         Name = "MyApp DB subnet group"
     }
 }
 
-resource "aws_db_instance" "web-rds-01" {
-    identifier = "myappdb-rds"
-    allocated_storage = 10
-    engine = "mysql"
-    engine_version = "5.6.17"
-    instance_class = "db.t1.micro"
-    name = "myappdb"
-    username = "foo"
-    password = "bar"
-    vpc_security_group_ids = ["${aws_security_group.myapp_mysql_rds.id"]
-    db_subnet_group_name = "${aws_db_subnet_group.myapp-db.id}"
-    parameter_group_name = "default.mysql5.6"
+
+resource "aws_db_instance" "mydb1" {  
+  allocated_storage        = 10 # gigabytes
+  backup_retention_period  = 7   # in days
+  db_subnet_group_name     = "${aws_db_subnet_group.myapp-db.id}"
+  engine                   = "postgres"
+  engine_version           = "9.5.4"
+  identifier               = "mydb1"
+  instance_class           = "db.r3.large"
+  multi_az                 = false
+  name                     = "mydb1"
+  # parameter_group_name     = "mydbparamgroup1" # if you have tuned it
+  password                 = "password"
+  port                     = 5432
+  publicly_accessible      = false
+  storage_encrypted        = true # you should always do this
+  storage_type             = "gp2"
+  username                 = "mydb1"
+  vpc_security_group_ids   = ["${aws_security_group.mydb1.id}"]
 }
+
+
+resource "aws_subnet" "public_1a" {
+    
+    vpc_id = "${aws_vpc.myapp.id}"
+    cidr_block = "10.100.0.0/24"
+    map_public_ip_on_launch = "true"
+    availability_zone = "us-east-1a"
+
+    tags {
+        Name = "Public 1A"
+    }
+}
+
+
+
+
 
