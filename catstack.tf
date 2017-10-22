@@ -5,7 +5,12 @@ provider "aws" {
 }
 
 resource "aws_vpc" "myapp" {
-     cidr_block = "10.100.0.0/16"
+     cidr_block = "10.100.0.0/16"   
+}
+
+resource "aws_main_route_table_association" "a" {
+  vpc_id = "${aws_vpc.myapp.id}"
+  route_table_id = "${aws_route_table.r.id}"
 }
 
 resource "aws_security_group" "allow_ssh" {
@@ -17,7 +22,7 @@ resource "aws_security_group" "allow_ssh" {
       from_port = 22
       to_port = 22
       protocol = "tcp"
-      cidr_blocks = ["37.228.251.130/32"]
+      cidr_blocks = ["0.0.0.0/0"]
   }
 
   tags {
@@ -120,6 +125,7 @@ resource "aws_db_instance" "mydb1" {
   storage_encrypted        = true # you should always do this
   storage_type             = "gp2"
   username                 = "mydb1"
+  skip_final_snapshot      = true
   vpc_security_group_ids   = ["${aws_security_group.mydb1.id}"]
 }
 
@@ -137,6 +143,23 @@ resource "aws_subnet" "public_1a" {
 }
 
 
+resource "aws_internet_gateway" "gw" {
+    vpc_id = "${aws_vpc.myapp.id}"
+
+    tags {
+        Name = "myapp gw"
+    }
+}
+
+resource "aws_route_table" "r" {
+  vpc_id = "${aws_vpc.myapp.id}"
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = "${aws_internet_gateway.gw.id}"
+  }
+
+}
 
 
 
