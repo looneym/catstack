@@ -4,12 +4,12 @@ provider "aws" {
   profile                 = "default"
 }
 
-resource "aws_vpc" "catstack" {
+resource "aws_vpc" "myapp" {
      cidr_block = "10.100.0.0/16"
 }
 
 resource "aws_subnet" "public_1a" {
-    vpc_id = "${aws_vpc.catstack.id}"
+    vpc_id = "${aws_vpc.myapp.id}"
     cidr_block = "10.100.0.0/24"
     map_public_ip_on_launch = "true"
     availability_zone = "us-east-1a"
@@ -19,24 +19,35 @@ resource "aws_subnet" "public_1a" {
     }
 }
 
+resource "aws_subnet" "public_1b" {
+    vpc_id = "${aws_vpc.myapp.id}"
+    cidr_block = "10.100.1.0/24"
+    map_public_ip_on_launch = "true"
+    availability_zone = "us-east-1b"
+
+    tags {
+        Name = "Public 1B"
+    }
+}
+
 resource "aws_internet_gateway" "gw" {
     vpc_id = "${aws_vpc.myapp.id}"
 
     tags {
-        Name = "catstack gw"
+        Name = "myapp gw"
     }
 }
 
 resource "aws_security_group" "allow_ssh" {
   name = "allow_all"
   description = "Allow inbound SSH traffic from my IP"
-  vpc_id = "${aws_vpc.catstack.id}"
+  vpc_id = "${aws_vpc.myapp.id}"
 
   ingress {
       from_port = 22
       to_port = 22
       protocol = "tcp"
-      cidr_blocks = ["123.123.123.123/32"]
+      cidr_blocks = ["37.228.251.130/32"]
   }
 
   tags {
@@ -64,16 +75,16 @@ resource "aws_security_group" "web_server" {
   }
 }
 
-resource "aws_security_group" "myapp_postgres_rds" {
+resource "aws_security_group" "myapp_mysql_rds" {
   name = "web server"
-  description = "Allow access to Postgres RDS"
-  vpc_id = "${aws_vpc.catstack.id}"
+  description = "Allow access to MySQL RDS"
+  vpc_id = "${aws_vpc.myapp.id}"
 
   ingress {
-      from_port = 5432
-      to_port = 5432
+      from_port = 3306
+      to_port = 3306
       protocol = "tcp"
-      cidr_blocks = ["${aws_instance.web01.private_ip}"]
+      cidr_blocks = ["${aws_instance.web01.private_ip}","${aws_instance.web02.private_ip}"]
   }
 
   egress {
@@ -95,6 +106,16 @@ resource "aws_instance" "web01" {
     }
 }
 
+resource "aws_instance" "web02" {
+    ami = "ami-408c7f28"
+    instance_type = "t1.micro"
+    subnet_id = "${aws_subnet.public_1b.id}"
+    vpc_security_group_ids = ["${aws_security_group.web_server.id}","${aws_security_group.allow_ssh.id}"]
+    key_name = "myapp keypair"
+    tags {
+        Name = "web02"
+    }
+}
 
 resource "aws_elb" "web-elb" {
   name = "web-elb"
@@ -116,7 +137,7 @@ resource "aws_elb" "web-elb" {
     interval = 30
   }
 
-  instances = ["${aws_instance.web01.id}"]
+  instances = ["${aws_instance.web01.id}","${aws_instance.web02.id}"]
 
   cross_zone_load_balancing = true
   idle_timeout = 400
@@ -128,10 +149,10 @@ resource "aws_elb" "web-elb" {
   }
 }
 
-resource "aws_db_subnet_group" "catstack-db" {
+resource "aws_db_subnet_group" "myapp-db" {
     name = "main"
     description = "Our main group of subnets"
-    subnet_ids = ["${aws_subnet.public-1a.id}"]
+    subnet_ids = ["${aws_subnet.public-1a.id}", "${aws_subnet.public-1b.id}"]
     tags {
         Name = "MyApp DB subnet group"
     }
@@ -147,7 +168,7 @@ resource "aws_db_instance" "web-rds-01" {
     username = "foo"
     password = "bar"
     vpc_security_group_ids = ["${aws_security_group.myapp_mysql_rds.id"]
-    db_subnet_group_name = "${aws_db_subnet_group.catstacks-db.id}"
+    db_subnet_group_name = "${aws_db_subnet_group.myapp-db.id}"
     parameter_group_name = "default.mysql5.6"
 }
 
