@@ -1,17 +1,96 @@
+###############################################################
+#
+#  CONFIG
+#
+###############################################################
+
 provider "aws" {
   region                  = "us-east-1"
   shared_credentials_file = "/Users/looneym/.aws/credentials"
   profile                 = "default"
 }
 
+###############################################################
+#
+#  EC2
+#
+###############################################################
+
+resource "aws_instance" "web01" {
+    ami = "ami-408c7f28"
+    instance_type = "t1.micro"
+    subnet_id = "${aws_subnet.public_1a.id}"
+    vpc_security_group_ids = ["${aws_security_group.web_server.id}","${aws_security_group.allow_ssh.id}"]
+    key_name = "sobotka"
+    tags {
+        Name = "web01"
+    }
+}
+
+###############################################################
+#
+#  DB
+#
+###############################################################
+
+resource "aws_db_instance" "mydb1" {  
+  allocated_storage        = 10 # gigabytes
+  backup_retention_period  = 7   # in days
+  db_subnet_group_name     = "${aws_db_subnet_group.myapp-db.id}"
+  engine                   = "postgres"
+  engine_version           = "9.5.4"
+  identifier               = "mydb1"
+  instance_class           = "db.r3.large"
+  multi_az                 = false
+  name                     = "mydb1"
+  # parameter_group_name     = "mydbparamgroup1" # if you have tuned it
+  password                 = "password"
+  port                     = 5432
+  publicly_accessible      = false
+  storage_encrypted        = true # you should always do this
+  storage_type             = "gp2"
+  username                 = "mydb1"
+  skip_final_snapshot      = true
+  vpc_security_group_ids   = ["${aws_security_group.mydb1.id}"]
+}
+
+###############################################################
+#
+#  VPC
+#
+###############################################################
+
 resource "aws_vpc" "myapp" {
-     cidr_block = "10.100.0.0/16"   
+  cidr_block = "10.100.0.0/16"   
+}
+
+resource "aws_route_table" "r" {
+  vpc_id = "${aws_vpc.myapp.id}"
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = "${aws_internet_gateway.gw.id}"
+  }
 }
 
 resource "aws_main_route_table_association" "a" {
   vpc_id = "${aws_vpc.myapp.id}"
   route_table_id = "${aws_route_table.r.id}"
 }
+
+resource "aws_internet_gateway" "gw" {
+    vpc_id = "${aws_vpc.myapp.id}"
+
+    tags {
+        Name = "myapp gw"
+    }
+}
+
+###############################################################
+#
+#  SECURITY GROUPS
+#
+###############################################################
 
 resource "aws_security_group" "allow_ssh" {
   name = "allow_all"
@@ -50,18 +129,6 @@ resource "aws_security_group" "web_server" {
   }
 }
 
-
-resource "aws_instance" "web01" {
-    ami = "ami-408c7f28"
-    instance_type = "t1.micro"
-    subnet_id = "${aws_subnet.public_1a.id}"
-    vpc_security_group_ids = ["${aws_security_group.web_server.id}","${aws_security_group.allow_ssh.id}"]
-    key_name = "sobotka"
-    tags {
-        Name = "web01"
-    }
-}
-
 resource "aws_security_group" "mydb1" {  
   name = "mydb1"
 
@@ -85,6 +152,11 @@ resource "aws_security_group" "mydb1" {
   }
 }
 
+###############################################################
+#
+#  SUBNETS
+#
+###############################################################
 
 resource "aws_subnet" "public_1b" {
     vpc_id = "${aws_vpc.myapp.id}"
@@ -96,39 +168,6 @@ resource "aws_subnet" "public_1b" {
         Name = "Public 1B"
     }
 }
-
-
-resource "aws_db_subnet_group" "myapp-db" {
-    name = "main"
-    description = "Our main group of subnets"
-    subnet_ids = ["${aws_subnet.public_1a.id}", "${aws_subnet.public_1b.id}"]
-    tags {
-        Name = "MyApp DB subnet group"
-    }
-}
-
-
-resource "aws_db_instance" "mydb1" {  
-  allocated_storage        = 10 # gigabytes
-  backup_retention_period  = 7   # in days
-  db_subnet_group_name     = "${aws_db_subnet_group.myapp-db.id}"
-  engine                   = "postgres"
-  engine_version           = "9.5.4"
-  identifier               = "mydb1"
-  instance_class           = "db.r3.large"
-  multi_az                 = false
-  name                     = "mydb1"
-  # parameter_group_name     = "mydbparamgroup1" # if you have tuned it
-  password                 = "password"
-  port                     = 5432
-  publicly_accessible      = false
-  storage_encrypted        = true # you should always do this
-  storage_type             = "gp2"
-  username                 = "mydb1"
-  skip_final_snapshot      = true
-  vpc_security_group_ids   = ["${aws_security_group.mydb1.id}"]
-}
-
 
 resource "aws_subnet" "public_1a" {
     
@@ -142,24 +181,12 @@ resource "aws_subnet" "public_1a" {
     }
 }
 
-
-resource "aws_internet_gateway" "gw" {
-    vpc_id = "${aws_vpc.myapp.id}"
-
+resource "aws_db_subnet_group" "myapp-db" {
+    name = "main"
+    description = "Our main group of subnets"
+    subnet_ids = ["${aws_subnet.public_1a.id}", "${aws_subnet.public_1b.id}"]
     tags {
-        Name = "myapp gw"
+        Name = "MyApp DB subnet group"
     }
 }
-
-resource "aws_route_table" "r" {
-  vpc_id = "${aws_vpc.myapp.id}"
-
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = "${aws_internet_gateway.gw.id}"
-  }
-
-}
-
-
 
